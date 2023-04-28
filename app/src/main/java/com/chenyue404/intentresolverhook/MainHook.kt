@@ -1,9 +1,11 @@
 package com.chenyue404.intentresolverhook
 
 import android.content.Intent
+import android.os.Build
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.XposedHelpers.findAndHookMethod
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
@@ -30,43 +32,75 @@ class MainHook : IXposedHookLoadPackage {
 
         log("")
 
-        findAndHookMethod(
-            "com.android.server.IntentResolver", classLoader,
-            "queryIntent",
-            Intent::class.java,
-            String::class.java,//resolvedType
-            Boolean::class.java,//defaultOnly
-            Int::class.java,//userId
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val intent = param.args[0] as Intent
-                    val resolvedType = param.args[1]
-                    val defaultOnly = param.args[2] as Boolean
-                    val userId = param.args[3] as Int
+        val androidVersion = Build.VERSION.SDK_INT
+        var paramIndex = 0
 
-                    if (intent.action != "android.intent.action.INSTALL_PACKAGE") {
-                        return
-                    }
-                    param.args[2] = false
+        val hook = object : XC_MethodHook() {
+            var before = ""
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val intent = param.args[paramIndex] as Intent
+                val resolvedType = param.args[paramIndex + 1]
+                val defaultOnly = param.args[paramIndex + 2] as Boolean
+                val userId = param.args[paramIndex + 3] as Int
 
-                    log("intent=${intent.transToStr()}")
-                    log("resolvedType=$resolvedType, defaultOnly=$defaultOnly, userId=$userId")
+//                if (intent.action != "android.intent.action.INSTALL_PACKAGE") {
+//                    return
+//                }
+//                param.args[paramIndex + 2] = false
+
+//                log("resolvedType=$resolvedType, defaultOnly=$defaultOnly, userId=$userId\nintent=${intent.transToStr()}")
+                before =
+                    "resolvedType=$resolvedType, defaultOnly=$defaultOnly, userId=$userId\nintent=${intent.transToStr()}"
+            }
+
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (param.result == null) {
+                    log("null")
+                    return
                 }
-
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (param.result == null) {
-                        log("null")
-                        return
-                    }
-                    val intent = param.args[0] as Intent
-                    if (intent.action != "android.intent.action.INSTALL_PACKAGE") {
-                        return
-                    }
-                    val list = param.result as List<*>
-                    val str = list.joinToString { it.toString() }
-                    log("list.size=${list.size}, list=$str")
+                val intent = param.args[paramIndex] as Intent
+//                if (intent.action != "android.intent.action.INSTALL_PACKAGE") {
+//                    return
+//                }
+                val list = param.result as List<*>
+                val str = list.joinToString { it.toString() }
+//                log("list.size=${list.size}, list=$str")
+                if (list.isNotEmpty()) {
+                    log("$before\nlist.size=${list.size}")
                 }
             }
-        )
+        }
+
+        when (androidVersion) {
+            in 0..Build.VERSION_CODES.S_V2 -> {
+                findAndHookMethod(
+                    "com.android.server.IntentResolver", classLoader,
+                    "queryIntent",
+                    Intent::class.java,
+                    String::class.java,//resolvedType
+                    Boolean::class.java,//defaultOnly
+                    Int::class.java,//userId
+                    hook
+                )
+            }
+
+            else -> {
+                paramIndex = 1
+                findAndHookMethod(
+                    "com.android.server.IntentResolver", classLoader,
+                    "queryIntent",
+                    XposedHelpers.findClass(
+                        "com.android.server.pm.snapshot.PackageDataSnapshot",
+                        classLoader
+                    ),
+                    Intent::class.java,
+                    String::class.java,//resolvedType
+                    Boolean::class.java,//defaultOnly
+                    Int::class.java,//userId
+                    Long::class.java,//customFlags
+                    hook
+                )
+            }
+        }
     }
 }
